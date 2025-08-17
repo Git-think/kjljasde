@@ -16,7 +16,7 @@ env:
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
   SOCKS5_PROXY: ${{ secrets.SOCKS5_PROXY }}
   CUSTOM_COMMAND: ${{ github.event.inputs.custom_command || vars.CUSTOM_COMMAND || secrets.CUSTOM_COMMAND }}
-  TARGET_HOST: "swutmfl8sx.serv00.net"
+  TARGET_HOST: ${{ secrets.TARGET_HOST }}
 
 defaults:
   run:
