@@ -26,7 +26,7 @@ jobs:
   run-all-tasks:
     runs-on: ubuntu-latest
     steps:
-    - name: 0 Keep Render Alive by Accessing Endpoint
+      - name: 0 Keep Render Alive by Accessing Endpoint
         run: |
           echo "访问保活地址 https://api.vqx.dpdns.org..."
           curl -s -L --max-time 10 "https://api.vqx.dpdns.org" || echo "访问失败，但继续执行后续步骤"
