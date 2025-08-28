@@ -10,7 +10,7 @@ on:
     - cron: "*/10 * * * *" # 修改这里的同时请记得修改RUN_INTERVAL_MINUTES变量
 
 env:
-  RUN_INTERVAL_MINUTES: 30
+  RUN_INTERVAL_MINUTES: 60
   ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
