@@ -7,10 +7,9 @@ on:
         description: '要执行的自定义命令'
         required: false
   schedule:
-    - cron: "*/10 * * * *" # 修改这里的同时请记得修改RUN_INTERVAL_MINUTES变量
+    - cron: "*/10 * * * *"
 
 env:
-  RUN_INTERVAL_MINUTES: 60
   ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -26,6 +25,12 @@ jobs:
   run-all-tasks:
     runs-on: ubuntu-latest
     steps:
+      - name: 0. Set Time Variables
+        id: set_time
+        run: |
+          echo "UTC_DATE=$(date -u +%Y-%m-%d)" >> $GITHUB_ENV
+          echo "CURRENT_HOUR_UTC=$(date -u +%H)" >> $GITHUB_ENV
+
       - name: 1. Check Host Status
         id: check_host
         run: |
@@ -40,27 +45,42 @@ jobs:
           else
             echo "Host is working correctly. No action needed."
             echo "run_next_steps=false" >> $GITHUB_OUTPUT
-            
-            # Send Telegram notification only on the first run after 18:00 Beijing Time (10:00 UTC)
-            CURRENT_HOUR_UTC=$(date -u +%H)
-            PREVIOUS_HOUR_UTC=$(date -u -d "${RUN_INTERVAL_MINUTES} minutes ago" +%H)
-
-            # Beijing time is UTC+8. 18:00 BJT is 10:00 UTC.
-            # We send on the first run where the current hour is >= 10 and the previous hour was < 10.
-            # This ensures the notification is sent only once per day when the status is OK.
-            if [[ "$CURRENT_HOUR_UTC" -ge 10 && "$PREVIOUS_HOUR_UTC" -lt 10 ]]; then
-              OK_MSG="✅ 主机 ${TARGET_HOST} 工作正常，无需执行任何操作。"
-              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-                -d chat_id="${TELEGRAM_CHAT_ID}" \
-                --data-urlencode text="$(echo -e "$OK_MSG")"
-            fi
           fi
 
-      - name: 2. Checkout repository
+      - name: 2. Restore notification cache for today
+        if: steps.check_host.outputs.run_next_steps == 'false'
+        id: cache_notified
+        uses: actions/cache/restore@v4
+        with:
+          path: ./.notified_flag
+          key: notified-flag-${{ runner.os }}-${{ env.UTC_DATE }}
+
+      - name: 3. Send Daily OK Notification (if needed)
+        if: |
+          steps.check_host.outputs.run_next_steps == 'false' &&
+          env.CURRENT_HOUR_UTC >= 10 &&
+          steps.cache_notified.outputs.cache-hit != 'true'
+        run: |
+          OK_MSG="✅ 主机 ${TARGET_HOST} 工作正常，无需执行任何操作。"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode text="$(echo -e "$OK_MSG")"
+          
+          # Create flag file after sending notification
+          touch ./.notified_flag
+
+      - name: 4. Save notification cache for today
+        if: steps.cache_notified.outputs.cache-hit != 'true' && steps.check_host.outputs.run_next_steps == 'false'
+        uses: actions/cache/save@v4
+        with:
+          path: ./.notified_flag
+          key: ${{ steps.cache_notified.outputs.cache-primary-key }}
+
+      - name: 5. Checkout repository
         if: steps.check_host.outputs.run_next_steps == 'true'
         uses: actions/checkout@v4
 
-      - name: 3. Set up SSHPass and ProxyChains
+      - name: 6. Set up SSHPass and ProxyChains
         if: steps.check_host.outputs.run_next_steps == 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y sshpass jq curl netcat-openbsd proxychains4
@@ -111,11 +131,12 @@ jobs:
             echo "==== proxychains4.conf ===="
             cat /etc/proxychains4.conf
           fi
-      - name: 4. Create accounts.json
+          
+      - name: 7. Create accounts.json
         if: steps.check_host.outputs.run_next_steps == 'true'
         run: echo "$ACCOUNTS_JSON" > accounts.json
 
-      - name: 5. Generate and execute SSH commands (via proxy)
+      - name: 8. Generate and execute SSH commands (via proxy)
         if: steps.check_host.outputs.run_next_steps == 'true'
         run: |
           OUTPUT_FILE="ssh_output.txt"
@@ -128,7 +149,8 @@ jobs:
             proxychains4 sshpass -p "$password" ssh -o StrictHostKeyChecking=no "$username@$ssh_addr" "$CUSTOM_COMMAND" 2>&1 | tee -a "$OUTPUT_FILE"
             echo "" >> "$OUTPUT_FILE"
           done < <(jq -c '.[]' accounts.json)
-      - name: 6. Send Telegram notification with output
+
+      - name: 9. Send Telegram notification with output
         if: always() && steps.check_host.outputs.run_next_steps == 'true'
         run: |
           STATUS="✅ 侦测到服务异常，已执行重启命令"
@@ -143,4 +165,3 @@ jobs:
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d parse_mode="Markdown" \
             --data-urlencode text="$(echo -e "$FULL_MSG")"
-
